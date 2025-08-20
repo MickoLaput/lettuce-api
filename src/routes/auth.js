@@ -7,10 +7,17 @@ const jwt = require('jsonwebtoken');
 router.post('/register', async (req, res) => {
   try {
     const b = req.body || {};
-    const required = ['email','password','username','firstname','lastname','birthdate','country','city'];
-    if (required.some(k => !b[k])) return res.status(400).json({ ok: false, error: 'Missing fields' });
+    console.log('REGISTER payload:', b); // <— see what Android sends
 
-    const [dup] = await pool.query('SELECT id FROM users WHERE email=? OR username=?', [b.email, b.username]);
+    const required = ['email','password','username','firstname','lastname','birthdate','country','city'];
+    if (required.some(k => !b[k])) {
+      return res.status(400).json({ ok: false, error: 'Missing fields' });
+    }
+
+    const [dup] = await pool.query(
+      'SELECT id FROM users WHERE email=? OR username=?',
+      [b.email, b.username]
+    );
     if (dup.length) return res.status(409).json({ ok: false, error: 'Email or username already used' });
 
     const hash = await bcrypt.hash(b.password, 10);
@@ -23,8 +30,9 @@ router.post('/register', async (req, res) => {
 
     res.status(201).json({ ok: true, userId: r.insertId });
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ ok: false, error: 'Server error' });
+    console.error('REGISTER ERROR:', e);  // <— see it in Render logs
+    // Return a useful message while debugging
+    res.status(500).json({ ok: false, error: e.sqlMessage || e.message || String(e) });
   }
 });
 
