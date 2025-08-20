@@ -1,15 +1,16 @@
+// src/db.js
 const mysql = require('mysql2/promise');
 
 const pool = mysql.createPool({
-  host: process.env.DB_HOST,
+  host: process.env.DB_HOST,     // e.g. sql.freedb.tech
+  port: Number(process.env.DB_PORT || 3306),
   user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
+  password: process.env.DB_PASS,
   database: process.env.DB_NAME,
-  port: +(process.env.DB_PORT || 3306),
   waitForConnections: true,
-  connectionLimit: 5,
-  // Set DB_SSL=true in Render if your host requires TLS
-  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: true } : undefined
+  connectionLimit: 10,
+  // If provider requires TLS:
+  // ssl: { rejectUnauthorized: false }
 });
 
 module.exports = pool;
