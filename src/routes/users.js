@@ -2,9 +2,9 @@
 const router = require('express').Router();
 const pool = require('../db');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs'); // for password updates
+const bcrypt = require('bcryptjs');
 
-// Accept both {id} and old {uid}; default secret like auth.js
+// Accept both {id} and old {uid}
 function verifyToken(req, res, next) {
   const h = req.headers.authorization || '';
   const token = h.startsWith('Bearer ') ? h.slice(7) : null;
@@ -22,7 +22,6 @@ function verifyToken(req, res, next) {
 // GET /api/me
 router.get('/me', verifyToken, async (req, res) => {
   try {
-    console.log('[ME] id=', req.user.id);
     const [rows] = await pool.query(
       `SELECT id,
               username,
@@ -30,15 +29,14 @@ router.get('/me', verifyToken, async (req, res) => {
               firstname,
               middlename,
               lastname,
+              CONCAT_WS(' ', firstname, middlename, lastname) AS name,
               DATE_FORMAT(birth_date, '%Y-%m-%d') AS dob,
               Country  AS country,
-              City     AS city,
-              role
+              City     AS city
        FROM users
        WHERE id = ? LIMIT 1`,
       [req.user.id]
     );
-    console.log('[ME] rows=', rows.length);
     if (!rows.length) return res.status(404).json({ error: 'not_found' });
     res.json({ user: rows[0] });
   } catch (e) {
