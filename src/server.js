@@ -27,6 +27,17 @@ app.use(express.json());
 // health check
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
+const pool = require('./db');
+app.get('/api/db-ping', async (_req, res) => {
+  const t0 = Date.now();
+  try {
+    await pool.query({ sql: 'SELECT 1', timeout: 5000 });
+    res.json({ ok: true, ms: Date.now() - t0 });
+  } catch (e) {
+    res.status(500).json({ ok: false, ms: Date.now() - t0, err: e.code || String(e) });
+  }
+});
+
 // serve uploaded files
 app.use(
   '/uploads',
