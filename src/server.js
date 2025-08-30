@@ -18,7 +18,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/forum', forumRoutes);
 app.use('/api', usersRoutes);
 app.use('/api', treatmentsRoutes);
-app.use('/uploads', express.static('uploads'));  
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'))); 
 app.use('/api', diagnosesRoutes);
 
 const PORT = process.env.PORT || 3000;
