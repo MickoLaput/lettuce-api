@@ -19,4 +19,19 @@ router.get('/treatments', async (req, res) => {
   }
 });
 
+// add this to also accept /api/treatments/:disease
+router.get('/treatments/:disease', async (req, res) => {
+  try {
+    const key = (req.params.disease || '').trim().toLowerCase();
+    const [rows] = await pool.query(
+      'SELECT protocol FROM treatments WHERE disease = ? LIMIT 1', [key]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'not_found' });
+    res.json({ protocol: rows[0].protocol });
+  } catch (e) {
+    console.error('GET /api/treatments/:disease error:', e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
 module.exports = router;
