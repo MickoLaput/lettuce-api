@@ -1,25 +1,57 @@
+// src/server.js
 require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
-
-const authRoutes  = require('./routes/auth');
-const forumRoutes = require('./routes/forum');
-const usersRoutes = require('./routes/users');
-const treatmentsRoutes = require('./routes/treatments'); 
-const diagnosesRoutes = require('./routes/diagnoses');
+const path = require('path');
+const fs = require('fs');
 
 const app = express();
+
+// ----- Uploads dir (works locally & on Render) -----
+const isProd = process.env.NODE_ENV === 'production';
+const UPLOAD_DIR =
+  process.env.UPLOAD_DIR ||
+  (isProd ? '/tmp/uploads' : path.join(__dirname, 'uploads'));
+
+// ensure the folder exists
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+// make it visible to route files that read from env at require-time
+process.env.UPLOAD_DIR = UPLOAD_DIR;
+
+// ----- Core middleware -----
 app.use(cors());
 app.use(express.json());
 
-app.get('/api/health', (req, res) => res.json({ ok: true }));
+// health check
+app.get('/api/health', (_req, res) => res.json({ ok: true }));
+
+// serve uploaded files
+app.use(
+  '/uploads',
+  express.static(UPLOAD_DIR, {
+    // (optional) long cache for immutable files
+    setHeaders: (res) => res.set('Cache-Control', 'public, max-age=31536000, immutable'),
+  })
+);
+
+// ----- Routes -----
+const authRoutes = require('./routes/auth');
+const forumRoutes = require('./routes/forum');
+const usersRoutes = require('./routes/users');
+const treatmentsRoutes = require('./routes/treatments');
+const diagnosesRoutes = require('./routes/diagnoses'); // should use UPLOAD_DIR (env) internally
 
 app.use('/api/auth', authRoutes);
 app.use('/api/forum', forumRoutes);
 app.use('/api', usersRoutes);
 app.use('/api', treatmentsRoutes);
-app.use('/uploads', express.static(path.join(__dirname, 'uploads'))); 
 app.use('/api', diagnosesRoutes);
 
+// ----- Server -----
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`API listening on ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`API listening on ${PORT}`);
+  console.log(`Serving uploads from: ${UPLOAD_DIR}`);
+});
