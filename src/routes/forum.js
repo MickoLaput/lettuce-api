@@ -14,7 +14,8 @@ function verifyToken(req, res, next) {
     if (!req.user.id) return res.status(401).json({ ok:false, error: 'bad_token_payload' });
     next();
   } catch (e) {
-    return res.status(401).json({ ok:false, error: 'bad_token' });
+    console.warn('[JWT VERIFY FAILED]', e.name, e.message);
+    return res.status(401).json({ ok:false, error: e.name });
   }
 }
 
