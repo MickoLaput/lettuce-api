@@ -82,7 +82,7 @@ router.get('/posts', async (req, res) => {
 // POST /api/forum/posts   (Authorization: Bearer <jwt>)
 router.post('/posts', verifyToken, async (req, res) => {
   try {
-    const { title, content /*, image_url */ } = req.body || {};
+    const { title, content, image_url } = req.body || {};
     if (!title || !content) {
       return res.status(400).json({ ok:false, error: 'title_and_content_required' });
     }
