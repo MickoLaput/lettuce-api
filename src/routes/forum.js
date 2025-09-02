@@ -63,7 +63,7 @@ router.get('/posts', async (req, res) => {
       author: r.author || 'User',
       comments: r.comments || 0,
       score: r.score || 0,
-      image_url: null
+      image_url: r.image_url || null
     }));
 
     const [cnt] = await pool.query(
