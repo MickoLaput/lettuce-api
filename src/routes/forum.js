@@ -1,13 +1,31 @@
+// src/routes/forum.js
 const router = require('express').Router();
 const pool = require('../db');
+const jwt = require('jsonwebtoken');
 
+/* ---------- auth helper (same style as users.js) ---------- */
+function verifyToken(req, res, next) {
+  const h = req.headers.authorization || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
+  if (!token) return res.status(401).json({ ok:false, error: 'no_token' });
+  try {
+    const p = jwt.verify(token, process.env.JWT_SECRET || 'dev');
+    req.user = { id: p.id || p.uid, role: p.role };
+    if (!req.user.id) return res.status(401).json({ ok:false, error: 'bad_token_payload' });
+    next();
+  } catch (e) {
+    return res.status(401).json({ ok:false, error: 'bad_token' });
+  }
+}
+
+/* ---------- LIST POSTS ---------- */
 // GET /api/forum/posts?q=banana&sort=popular&limit=20&offset=0
 router.get('/posts', async (req, res) => {
   try {
     const q = (req.query.q || '').trim();
     const sort = (req.query.sort || 'new').toLowerCase();
-    const limit = Number(req.query.limit || 20);
-    const offset = Number(req.query.offset || 0);
+    const limit  = Math.min(Number(req.query.limit || 20), 100);
+    const offset = Math.max(Number(req.query.offset || 0), 0);
 
     const where = [];
     const params = [];
@@ -36,8 +54,8 @@ router.get('/posts', async (req, res) => {
       ${orderSql}
       LIMIT ? OFFSET ?`;
 
-    const rows = await pool.query(sql, [...params, limit, offset]);
-    const items = rows[0].map(r => ({
+    const [rows] = await pool.query(sql, [...params, limit, offset]);
+    const items = rows.map(r => ({
       id: r.id,
       title: r.title,
       content: r.content,
@@ -48,17 +66,37 @@ router.get('/posts', async (req, res) => {
       image_url: null
     }));
 
-    // (optional) total count
-    const cntSql = `
-      SELECT COUNT(*) AS n
-      FROM forum_posts p
-      ${whereSql}`;
-    const cnt = await pool.query(cntSql, params);
+    const [cnt] = await pool.query(
+      `SELECT COUNT(*) AS n FROM forum_posts p ${whereSql}`,
+      params
+    );
 
-    res.json({ ok: true, items, total: cnt[0][0].n });
+    res.json({ ok: true, items, total: cnt[0].n });
   } catch (e) {
     console.error('LIST POSTS ERROR:', e);
     res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
+/* ---------- CREATE POST ---------- */
+// POST /api/forum/posts   (Authorization: Bearer <jwt>)
+router.post('/posts', verifyToken, async (req, res) => {
+  try {
+    const { title, content /*, image_url */ } = req.body || {};
+    if (!title || !content) {
+      return res.status(400).json({ ok:false, error: 'title_and_content_required' });
+    }
+
+    // forum_posts doesn’t have image_url column, ignore for now.
+    const [r] = await pool.query(
+      'INSERT INTO forum_posts (user_id, title, content) VALUES (?,?,?)',
+      [req.user.id, title, content]
+    );
+
+    res.status(201).json({ ok: true, id: r.insertId });
+  } catch (e) {
+    console.error('CREATE POST ERROR:', e);
+    res.status(500).json({ ok:false, error: 'server_error' });
   }
 });
 
