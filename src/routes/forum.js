@@ -41,7 +41,7 @@ router.get('/posts', async (req, res) => {
 
     const sql = `
       SELECT
-        p.id, p.title, p.content, p.created_at,
+        p.id, p.title, p.content, p.image_url, p.created_at,
         CONCAT(u.firstname, ' ', u.lastname) AS author,
         IFNULL(SUM(CASE WHEN v.vote=1 THEN 1 WHEN v.vote=-1 THEN -1 ELSE 0 END),0) AS score,
         COUNT(DISTINCT c.id) AS comments
@@ -89,8 +89,8 @@ router.post('/posts', verifyToken, async (req, res) => {
 
     // forum_posts doesn’t have image_url column, ignore for now.
     const [r] = await pool.query(
-      'INSERT INTO forum_posts (user_id, title, content) VALUES (?,?,?)',
-      [req.user.id, title, content]
+      'INSERT INTO forum_posts (user_id, title, content, image_url) VALUES (?,?,?,?)',
+      [req.user.id, title, content, image_url||null]
     );
 
     res.status(201).json({ ok: true, id: r.insertId });
