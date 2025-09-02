@@ -32,6 +32,7 @@ router.get('/me', verifyToken, async (req, res) => {
               CONCAT_WS(' ', firstname, middlename, lastname) AS name,
               DATE_FORMAT(birth_date, '%Y-%m-%d') AS dob,
               Country  AS country,
+              City     AS state,
               City     AS city
        FROM users
        WHERE id = ? LIMIT 1`,
@@ -47,7 +48,7 @@ router.get('/me', verifyToken, async (req, res) => {
 
 // PUT /api/me
 router.put('/me', verifyToken, async (req, res) => {
-  const { email, password, dob, country, city, firstname, middlename, lastname } = req.body || {};
+  const { email, password, dob, country, state, city, firstname, middlename, lastname } = req.body || {};
 
   const toSqlDate = (s) => {
     if (!s) return null;
@@ -65,6 +66,7 @@ router.put('/me', verifyToken, async (req, res) => {
     if (lastname != null)   { sets.push('lastname=?');   vals.push(lastname); }
     if (dob != null)        { sets.push('birth_date=?'); vals.push(toSqlDate(dob)); }
     if (country != null)    { sets.push('Country=?');    vals.push(country); }
+    if (state   != null) { sets.push('State=?');   vals.push(state); }
     if (city != null)       { sets.push('City=?');       vals.push(city); }
 
     if (password) {
