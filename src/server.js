@@ -53,12 +53,14 @@ const forumRoutes = require('./routes/forum');
 const usersRoutes = require('./routes/users');
 const treatmentsRoutes = require('./routes/treatments');
 const diagnosesRoutes = require('./routes/diagnoses'); // should use UPLOAD_DIR (env) internally
+const uploadRoutes = require('./routes/upload');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/forum', forumRoutes);
 app.use('/api', usersRoutes);
 app.use('/api', treatmentsRoutes);
 app.use('/api', diagnosesRoutes);
+app.use('/api', uploadRoutes);
 
 // ----- Server -----
 const PORT = process.env.PORT || 3000;
