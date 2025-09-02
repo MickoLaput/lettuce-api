@@ -15,7 +15,8 @@ function verifyToken(req, res, next) {
     if (!req.user.id) return res.status(401).json({ ok: false, error: 'bad_token_payload' });
     next();
   } catch {
-    return res.status(401).json({ ok: false, error: 'bad_token' });
+    console.warn('[JWT VERIFY FAILED]', e.name, e.message); // <— shows 'TokenExpiredError' or 'JsonWebTokenError: invalid signature'
+    return res.status(401).json({ ok:false, error: e.name });
   }
 }
 
