@@ -66,6 +66,7 @@ app.use('/api', diagnosesRoutes);
 app.use('/api', uploadRoutes);
 app.use('/api/diagnoses', diagnosesReportRoutes);
 app.use('/api/events', eventsRoutes);
+app.use('/api/feedback', require('./routes/feedback'));
 
 // ----- Server -----
 const PORT = process.env.PORT || 3000;
