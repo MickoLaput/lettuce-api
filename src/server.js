@@ -57,6 +57,7 @@ const diagnosesRoutes = require('./routes/diagnoses'); // should use UPLOAD_DIR 
 const uploadRoutes = require('./routes/upload');
 const diagnosesReportRoutes = require('./routes/diagnoses_report');
 const eventsRoutes = require('./routes/events');
+const faqRoutes = require('./routes/faq');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/forum', forumRoutes);
@@ -67,6 +68,7 @@ app.use('/api', uploadRoutes);
 app.use('/api/diagnoses', diagnosesReportRoutes);
 app.use('/api/events', eventsRoutes);
 app.use('/api/feedback', require('./routes/feedback'));
+app.use('/api', faqRoutes);
 
 // ----- Server -----
 const PORT = process.env.PORT || 3000;
