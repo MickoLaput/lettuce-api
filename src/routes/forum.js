@@ -30,31 +30,60 @@ function tryUserId(req) {
 }
 
 /* ===========================================================
-   LIST POSTS
-   GET /api/forum/posts?q=banana&sort=popular&limit=20&offset=0
+   LIST POSTS (with indicator + sort)
+   GET /api/forum/posts?q=...&sort=latest|popular|yours|open|closed&limit=20&offset=0
+   Only returns posts where indicator IN ('open','closed')
    =========================================================== */
 router.get('/posts', async (req, res) => {
   try {
-    const q = (req.query.q || '').trim();
-    const sort = (req.query.sort || 'new').toLowerCase();
+    const q      = (req.query.q || '').trim();
+    let   sort   = (req.query.sort || 'latest').toLowerCase();
     const limit  = Math.min(Number(req.query.limit || 20), 100);
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
+    // backwards-compat alias
+    if (sort === 'new') sort = 'latest';
+
+    // validate sort
+    const allowed = new Set(['latest','popular','yours','open','closed']);
+    if (!allowed.has(sort)) {
+      return res.status(400).json({ ok:false, error:'invalid_sort' });
+    }
+
     const where = [];
     const params = [];
+
+    // base visibility: only open/closed (never ban)
+    if (sort === 'open') {
+      where.push(`p.indicator = 'open'`);
+    } else if (sort === 'closed') {
+      where.push(`p.indicator = 'closed'`);
+    } else if (sort === 'yours') {
+      const uid = tryUserId(req);
+      if (!uid) return res.status(401).json({ ok:false, error:'login_required' });
+      where.push(`p.user_id = ?`);
+      params.push(uid);
+      where.push(`p.indicator IN ('open','closed')`);
+    } else {
+      // latest / popular
+      where.push(`p.indicator IN ('open','closed')`);
+    }
+
+    // full‑text filter
     if (q) {
-      where.push('(p.title LIKE ? OR p.content LIKE ?)');
+      where.push(`(p.title LIKE ? OR p.content LIKE ?)`);
       params.push(`%${q}%`, `%${q}%`);
     }
+
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-    const orderSql = sort === 'popular'
-      ? 'ORDER BY score DESC, p.created_at DESC'
-      : 'ORDER BY p.created_at DESC';
+    const orderSql = (sort === 'popular')
+      ? 'ORDER BY score DESC, p.created_at DESC, p.id DESC'
+      : 'ORDER BY p.created_at DESC, p.id DESC';
 
     const sql = `
       SELECT
-        p.id, p.title, p.content, p.image_url, p.created_at,
+        p.id, p.user_id, p.title, p.content, p.image_url, p.created_at, p.indicator,
         CONCAT(u.firstname, ' ', u.lastname) AS author,
         IFNULL(SUM(CASE WHEN v.vote=1 THEN 1 WHEN v.vote=-1 THEN -1 ELSE 0 END),0) AS score,
         COUNT(DISTINCT c.id) AS comments
@@ -68,6 +97,7 @@ router.get('/posts', async (req, res) => {
       LIMIT ? OFFSET ?`;
 
     const [rows] = await pool.query(sql, [...params, limit, offset]);
+
     const items = rows.map(r => ({
       id: r.id,
       title: r.title,
@@ -76,11 +106,23 @@ router.get('/posts', async (req, res) => {
       author: r.author || 'User',
       comments: r.comments || 0,
       score: r.score || 0,
-      image_url: r.image_url || null
+      image_url: r.image_url || null,
+      indicator: r.indicator || 'open'
     }));
 
+    // count (apply same where but ignore GROUP BY/ORDER)
+    // count DISTINCT to mirror GROUP BY p.id
     const [cnt] = await pool.query(
-      `SELECT COUNT(*) AS n FROM forum_posts p ${whereSql}`,
+      `SELECT COUNT(*) AS n
+       FROM (
+         SELECT p.id
+         FROM forum_posts p
+         JOIN users u ON u.id = p.user_id
+         LEFT JOIN votes v ON v.entity_type='post' AND v.entity_id=p.id
+         LEFT JOIN forum_comments c ON c.post_id = p.id
+         ${whereSql}
+         GROUP BY p.id
+       ) t`,
       params
     );
 
@@ -94,19 +136,29 @@ router.get('/posts', async (req, res) => {
 /* ===========================================================
    CREATE POST
    POST /api/forum/posts   (Authorization: Bearer <jwt>)
+   indicator defaults to 'open' via DB; you may pass indicator if needed.
    =========================================================== */
 router.post('/posts', verifyToken, async (req, res) => {
   try {
-    const { title, content, image_url } = req.body || {};
+    const { title, content, image_url, indicator } = req.body || {};
     if (!title || !content) {
       return res.status(400).json({ ok:false, error: 'title_and_content_required' });
     }
 
-    const [r] = await pool.query(
-      'INSERT INTO forum_posts (user_id, title, content, image_url) VALUES (?,?,?,?)',
-      [req.user.id, title, content, image_url || null]
-    );
+    // only allow 'open' or 'closed' on create, otherwise fallback to DB default
+    const allowed = new Set(['open','closed']);
+    const ind = allowed.has((indicator || '').toLowerCase()) ? indicator.toLowerCase() : null;
 
+    let sql, args;
+    if (ind) {
+      sql  = 'INSERT INTO forum_posts (user_id, title, content, image_url, indicator) VALUES (?,?,?,?,?)';
+      args = [req.user.id, title, content, image_url || null, ind];
+    } else {
+      sql  = 'INSERT INTO forum_posts (user_id, title, content, image_url) VALUES (?,?,?,?)';
+      args = [req.user.id, title, content, image_url || null];
+    }
+
+    const [r] = await pool.query(sql, args);
     res.status(201).json({ ok: true, id: r.insertId });
   } catch (e) {
     console.error('CREATE POST ERROR:', e);
@@ -116,7 +168,6 @@ router.post('/posts', verifyToken, async (req, res) => {
 
 /* ===========================================================
    POST DETAIL (with score + my_vote)
-   GET /api/forum/posts/:id
    =========================================================== */
 router.get('/posts/:id', async (req, res) => {
   try {
@@ -127,7 +178,7 @@ router.get('/posts/:id', async (req, res) => {
 
     const [rows] = await pool.query(`
       SELECT
-        p.id, p.user_id, p.title, p.content, p.image_url, p.created_at,
+        p.id, p.user_id, p.title, p.content, p.image_url, p.created_at, p.indicator,
         CONCAT(u.firstname,' ',u.lastname) AS author,
         IFNULL(SUM(CASE WHEN v.vote=1 THEN 1 WHEN v.vote=-1 THEN -1 ELSE 0 END),0) AS score,
         (
@@ -137,7 +188,7 @@ router.get('/posts/:id', async (req, res) => {
       FROM forum_posts p
       JOIN users u ON u.id=p.user_id
       LEFT JOIN votes v ON v.entity_type='post' AND v.entity_id=p.id
-      WHERE p.id=?
+      WHERE p.id=? AND p.indicator IN ('open','closed')
       GROUP BY p.id
     `, [uid, id]);
 
@@ -151,7 +202,6 @@ router.get('/posts/:id', async (req, res) => {
 
 /* ===========================================================
    LIST COMMENTS (flat; include my_vote). Supports parent_id for replies.
-   GET /api/forum/posts/:id/comments?parent_id=<nullable>&limit=50&offset=0
    =========================================================== */
 router.get('/posts/:id/comments', async (req, res) => {
   try {
@@ -188,7 +238,6 @@ router.get('/posts/:id/comments', async (req, res) => {
 
 /* ===========================================================
    CREATE COMMENT (supports replies via parent_id)
-   POST /api/forum/posts/:id/comments    { content, parent_id? }
    =========================================================== */
 router.post('/posts/:id/comments', verifyToken, async (req, res) => {
   try {
@@ -217,8 +266,6 @@ router.post('/posts/:id/comments', verifyToken, async (req, res) => {
 
 /* ===========================================================
    VOTE ENDPOINTS (toggle/clear)
-   POST /api/forum/posts/:id/vote     { vote: -1|0|1 }
-   POST /api/forum/comments/:id/vote  { vote: -1|0|1 }
    =========================================================== */
 router.post('/posts/:id/vote', verifyToken, (req, res) => voteEntity('post', req, res));
 router.post('/comments/:id/vote', verifyToken, (req, res) => voteEntity('comment', req, res));
