@@ -24,6 +24,7 @@ process.env.UPLOAD_DIR = UPLOAD_DIR;
 // ----- Core middleware -----
 app.use(cors());
 app.use(express.json());
+app.use(compression()); 
 
 // health check
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
