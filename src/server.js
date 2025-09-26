@@ -58,6 +58,7 @@ const uploadRoutes = require('./routes/upload');
 const diagnosesReportRoutes = require('./routes/diagnoses_report');
 const eventsRoutes = require('./routes/events');
 const faqRoutes = require('./routes/faq');
+const adminRoutes = require('./routes/admin');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/forum', forumRoutes);
@@ -69,6 +70,7 @@ app.use('/api/diagnoses', diagnosesReportRoutes);
 app.use('/api/events', eventsRoutes);
 app.use('/api/feedback', require('./routes/feedback'));
 app.use('/api', faqRoutes);
+app.use('/api/admin', adminRoutes);
 
 // ----- Server -----
 const PORT = process.env.PORT || 3000;
