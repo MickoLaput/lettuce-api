@@ -73,6 +73,7 @@ app.use('/api/events', eventsRoutes);
 app.use('/api/feedback', require('./routes/feedback'));
 app.use('/api', faqRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/notifications', require('./routes/notifications'));
 
 // ----- Server -----
 const PORT = process.env.PORT || 3000;
