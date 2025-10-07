@@ -324,4 +324,40 @@ async function voteEntity(entityType, req, res) {
   }
 }
 
+/* ===========================================================
+   BAN POST (admin only)
+   PUT /api/forum/posts/:id/ban     { reason }
+   =========================================================== */
+router.put('/posts/:id/ban', requireAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id || 0);
+    const reason = (req.body && req.body.reason ? String(req.body.reason) : '').trim();
+    if (!id || !reason) return res.status(400).json({ ok:false, error:'reason_required' });
+
+    // find the post + owner
+    const [rows] = await pool.query('SELECT id, user_id, indicator FROM forum_posts WHERE id=? LIMIT 1', [id]);
+    if (!rows.length) return res.status(404).json({ ok:false, error:'not_found' });
+
+    // update indicator
+    await pool.query('UPDATE forum_posts SET indicator="ban" WHERE id=?', [id]);
+
+    // write a notification to the post owner
+    const ownerId = rows[0].user_id;
+    const title = 'Your post was banned';
+    const message = `An admin banned your post (ID ${id}). Reason: ${reason}`;
+    const meta = JSON.stringify({ postId: id, reason, previousIndicator: rows[0].indicator });
+
+    await pool.query(
+      `INSERT INTO notifications (type, actor_id, recipient_id, post_id, title, message, meta)
+       VALUES (?,?,?,?,?,?,?)`,
+      ['post_banned', req.user.id, ownerId, id, title, message, meta]
+    );
+
+    res.json({ ok:true });
+  } catch (e) {
+    console.error('BAN POST ERROR:', e);
+    res.status(500).json({ ok:false, error:'server_error' });
+  }
+});
+
 module.exports = router;
