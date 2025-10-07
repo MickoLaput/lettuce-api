@@ -3,6 +3,23 @@ const router = require('express').Router();
 const pool   = require('../db');
 const jwt    = require('jsonwebtoken');
 
+function requireAdmin(req, res, next) {
+  const h = req.headers.authorization || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
+  if (!token) return res.status(401).json({ ok:false, error: 'no_token' });
+  try {
+    const p = jwt.verify(token, process.env.JWT_SECRET || 'dev');
+    if (!p || !p.id) return res.status(401).json({ ok:false, error:'bad_token_payload' });
+    if ((p.role || '').toLowerCase() !== 'admin') {
+      return res.status(403).json({ ok:false, error:'forbidden' });
+    }
+    req.user = { id: p.id, role: p.role };
+    next();
+  } catch (e) {
+    return res.status(401).json({ ok:false, error: e.name || 'unauthorized' });
+  }
+}
+
 /* ---------- auth helper (same style as users.js) ---------- */
 function verifyToken(req, res, next) {
   const h = req.headers.authorization || '';
