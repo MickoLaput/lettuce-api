@@ -360,4 +360,59 @@ router.put('/posts/:id/ban', requireAdmin, async (req, res) => {
   }
 });
 
+async function onlyOwnerOrAdmin(req, res, next) {
+  try {
+    const id = Number(req.params.id || 0);
+    if (!id) return res.status(400).json({ ok:false, error:'bad_id' });
+
+    const [[row]] = await pool.query(
+      'SELECT user_id FROM forum_posts WHERE id=? LIMIT 1',
+      [id]
+    );
+    if (!row) return res.status(404).json({ ok:false, error:'not_found' });
+
+    const isOwner = row.user_id === req.user.id;
+    const isAdmin = (req.user.role || '').toLowerCase() === 'admin';
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ ok:false, error:'forbidden' });
+    }
+
+    // stash for later (for notification)
+    req._postOwnerId = row.user_id;
+    next();
+  } catch (e) {
+    console.error('onlyOwnerOrAdmin error:', e);
+    res.status(500).json({ ok:false, error:'server_error' });
+  }
+}
+
+router.post('/posts/:id/close', verifyToken, onlyOwnerOrAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id || 0);
+    if (!id) return res.status(400).json({ ok:false, error:'bad_id' });
+
+    // update to closed (no-op if already closed)
+    await pool.query('UPDATE forum_posts SET indicator="closed" WHERE id=?', [id]);
+
+    // Optional: notify owner if someone else (e.g., admin) closed it
+    if (req.user.id !== req._postOwnerId) {
+      const title   = 'Your post was closed';
+      const message = `Your post (ID ${id}) was closed by ${ (req.user.role||'').toLowerCase()==='admin' ? 'an admin' : 'another user' }.`;
+      const meta    = JSON.stringify({ postId: id, action: 'closed' });
+
+      await pool.query(
+        `INSERT INTO notifications
+         (type, actor_id, recipient_id, post_id, title, message, meta)
+         VALUES (?,?,?,?,?,?,?)`,
+        ['post_closed', req.user.id, req._postOwnerId, id, title, message, meta]
+      );
+    }
+
+    res.json({ ok:true });
+  } catch (e) {
+    console.error('CLOSE POST ERROR:', e);
+    res.status(500).json({ ok:false, error:'server_error' });
+  }
+});
+
 module.exports = router;
