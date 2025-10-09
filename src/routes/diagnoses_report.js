@@ -18,12 +18,19 @@ function verifyToken(req, res, next) {
   }
 }
 
-/* Helper: turn DB path into a browser URL served by /uploads */
-function toPublicUrl(image_path) {
-  if (!image_path) return null;
-  if (/^https?:\/\//i.test(image_path)) return image_path;         // already absolute
-  const clean = String(image_path).replace(/^\/+/, '');             // remove leading slashes
-  return `/uploads/${clean}`;                                       // static served by server.js
+/* Turn DB path into a browser URL served by /uploads (idempotent). */
+function toPublicUrl(p) {
+  if (!p) return null;
+  if (/^https?:\/\//i.test(p)) return p;             // already absolute
+
+  // remove leading slashes
+  const clean = String(p).replace(/^\/+/, '');
+
+  // if it already starts with 'uploads/', just prefix one leading slash
+  if (clean.startsWith('uploads/')) return `/${clean}`;
+
+  // otherwise, mount under /uploads
+  return `/uploads/${clean}`;
 }
 
 /* ---------- LIST user diagnoses ----------
