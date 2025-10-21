@@ -2,6 +2,7 @@
 const router = require('express').Router();
 const pool   = require('../db');
 const jwt    = require('jsonwebtoken');
+const { notify } = require('../utils/notifier'); // <-- helper to insert notifications
 
 function requireAdmin(req, res, next) {
   const h = req.headers.authorization || '';
@@ -57,10 +58,10 @@ router.get('/posts', async (req, res) => {
     let   sort   = (req.query.sort || 'latest').toLowerCase();
     const limit  = Math.min(Number(req.query.limit || 20), 100);
     const offset = Math.max(Number(req.query.offset || 0), 0);
-
+	
     // backwards-compat alias
     if (sort === 'new') sort = 'latest';
-
+	
     // validate sort
     const allowed = new Set(['latest','popular','yours','open','closed']);
     if (!allowed.has(sort)) {
@@ -69,7 +70,7 @@ router.get('/posts', async (req, res) => {
 
     const where = [];
     const params = [];
-
+	
     // base visibility: only open/closed (never ban)
     if (sort === 'open') {
       where.push(`p.indicator = 'open'`);
@@ -86,14 +87,13 @@ router.get('/posts', async (req, res) => {
       where.push(`p.indicator IN ('open','closed')`);
     }
 
-    // full‑text filter
+	// full‑text filter
     if (q) {
       where.push(`(p.title LIKE ? OR p.content LIKE ?)`);
       params.push(`%${q}%`, `%${q}%`);
     }
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-
     const orderSql = (sort === 'popular')
       ? 'ORDER BY score DESC, p.created_at DESC, p.id DESC'
       : 'ORDER BY p.created_at DESC, p.id DESC';
@@ -126,7 +126,7 @@ router.get('/posts', async (req, res) => {
       image_url: r.image_url || null,
       indicator: r.indicator || 'open'
     }));
-
+	
     // count (apply same where but ignore GROUP BY/ORDER)
     // count DISTINCT to mirror GROUP BY p.id
     const [cnt] = await pool.query(
@@ -161,7 +161,7 @@ router.post('/posts', verifyToken, async (req, res) => {
     if (!title || !content) {
       return res.status(400).json({ ok:false, error: 'title_and_content_required' });
     }
-
+	
     // only allow 'open' or 'closed' on create, otherwise fallback to DB default
     const allowed = new Set(['open','closed']);
     const ind = allowed.has((indicator || '').toLowerCase()) ? indicator.toLowerCase() : null;
@@ -255,6 +255,7 @@ router.get('/posts/:id/comments', async (req, res) => {
 
 /* ===========================================================
    CREATE COMMENT (supports replies via parent_id)
+   -> NEW: Notify post owner (not self)
    =========================================================== */
 router.post('/posts/:id/comments', verifyToken, async (req, res) => {
   try {
@@ -274,6 +275,25 @@ router.post('/posts/:id/comments', verifyToken, async (req, res) => {
       `INSERT INTO forum_comments (post_id, user_id, parent_id, content) VALUES (?,?,?,?)`,
       [postId, req.user.id, parent_id || null, content]
     );
+
+    // --- Notify the post owner (skips self inside notify) ---
+    const [[post]] = await pool.query(
+      `SELECT user_id, title FROM forum_posts WHERE id=? LIMIT 1`,
+      [postId]
+    );
+    if (post) {
+      await notify({
+        recipientId: post.user_id,
+        actorId: req.user.id,
+        type: 'comment_on_post',
+        title: 'New answer to your post',
+        body: String(content).slice(0, 160),
+        subjectType: 'post',
+        subjectId: postId,
+        meta: { commentId: r.insertId }
+      });
+    }
+
     res.status(201).json({ ok:true, id: r.insertId });
   } catch (e) {
     console.error('CREATE COMMENT ERROR:', e);
@@ -283,6 +303,7 @@ router.post('/posts/:id/comments', verifyToken, async (req, res) => {
 
 /* ===========================================================
    VOTE ENDPOINTS (toggle/clear)
+   -> NEW: Notify post owner on UPVOTE of a post
    =========================================================== */
 router.post('/posts/:id/vote', verifyToken, (req, res) => voteEntity('post', req, res));
 router.post('/comments/:id/vote', verifyToken, (req, res) => voteEntity('comment', req, res));
@@ -317,6 +338,27 @@ async function voteEntity(entityType, req, res) {
         [uid, entityType, entityId, val]
       );
     }
+
+    // --- Notify only when it's an UPVOTE on a POST ---
+    if (entityType === 'post' && val === 1) {
+      const [[post]] = await pool.query(
+        `SELECT id, user_id, title FROM forum_posts WHERE id=? LIMIT 1`,
+        [entityId]
+      );
+      if (post) {
+        await notify({
+          recipientId: post.user_id,
+          actorId: uid,
+          type: 'upvote_on_post',
+          title: 'Your post was upvoted',
+          body: post.title ? String(post.title).slice(0, 140) : null,
+          subjectType: 'post',
+          subjectId: entityId,
+          meta: null
+        });
+      }
+    }
+
     res.json({ ok:true });
   } catch (e) {
     console.error('VOTE ERROR:', e);
@@ -327,6 +369,7 @@ async function voteEntity(entityType, req, res) {
 /* ===========================================================
    BAN POST (admin only)
    PUT /api/forum/posts/:id/ban     { reason }
+   -> FIXED to use title/body/subject_* columns
    =========================================================== */
 router.put('/posts/:id/ban', requireAdmin, async (req, res) => {
   try {
@@ -334,23 +377,20 @@ router.put('/posts/:id/ban', requireAdmin, async (req, res) => {
     const reason = (req.body && req.body.reason ? String(req.body.reason) : '').trim();
     if (!id || !reason) return res.status(400).json({ ok:false, error:'reason_required' });
 
-    // find the post + owner
     const [rows] = await pool.query('SELECT id, user_id, indicator FROM forum_posts WHERE id=? LIMIT 1', [id]);
     if (!rows.length) return res.status(404).json({ ok:false, error:'not_found' });
 
-    // update indicator
     await pool.query('UPDATE forum_posts SET indicator="ban" WHERE id=?', [id]);
 
-    // write a notification to the post owner
     const ownerId = rows[0].user_id;
     const title = 'Your post was banned';
-    const message = `An admin banned your post (ID ${id}). Reason: ${reason}`;
-    const meta = JSON.stringify({ postId: id, reason, previousIndicator: rows[0].indicator });
+    const body  = `An admin banned your post (ID ${id}). Reason: ${reason}`;
+    const meta  = JSON.stringify({ postId: id, reason, previousIndicator: rows[0].indicator });
 
     await pool.query(
-      `INSERT INTO notifications (type, actor_id, recipient_id, post_id, title, message, meta)
-       VALUES (?,?,?,?,?,?,?)`,
-      ['post_banned', req.user.id, ownerId, id, title, message, meta]
+      `INSERT INTO notifications (type, actor_id, recipient_id, title, body, subject_type, subject_id, meta)
+       VALUES (?,?,?,?,?,?,?,?)`,
+      ['post_banned', req.user.id, ownerId, title, body, 'post', id, meta]
     );
 
     res.json({ ok:true });
@@ -377,7 +417,6 @@ async function onlyOwnerOrAdmin(req, res, next) {
       return res.status(403).json({ ok:false, error:'forbidden' });
     }
 
-    // stash for later (for notification)
     req._postOwnerId = row.user_id;
     next();
   } catch (e) {
@@ -386,25 +425,26 @@ async function onlyOwnerOrAdmin(req, res, next) {
   }
 }
 
+/* ===========================================================
+   CLOSE POST (owner or admin)
+   -> FIXED to use title/body/subject_* columns + skip self notify
+   =========================================================== */
 router.post('/posts/:id/close', verifyToken, onlyOwnerOrAdmin, async (req, res) => {
   try {
     const id = Number(req.params.id || 0);
     if (!id) return res.status(400).json({ ok:false, error:'bad_id' });
 
-    // update to closed (no-op if already closed)
     await pool.query('UPDATE forum_posts SET indicator="closed" WHERE id=?', [id]);
 
-    // Optional: notify owner if someone else (e.g., admin) closed it
     if (req.user.id !== req._postOwnerId) {
-      const title   = 'Your post was closed';
-      const message = `Your post (ID ${id}) was closed by ${ (req.user.role||'').toLowerCase()==='admin' ? 'an admin' : 'another user' }.`;
-      const meta    = JSON.stringify({ postId: id, action: 'closed' });
+      const title = 'Your post was closed';
+      const body  = `Your post (ID ${id}) was closed by ${ (req.user.role||'').toLowerCase()==='admin' ? 'an admin' : 'another user' }.`;
+      const meta  = JSON.stringify({ postId: id, action: 'closed' });
 
       await pool.query(
-        `INSERT INTO notifications
-         (type, actor_id, recipient_id, post_id, title, message, meta)
-         VALUES (?,?,?,?,?,?,?)`,
-        ['post_closed', req.user.id, req._postOwnerId, id, title, message, meta]
+        `INSERT INTO notifications (type, actor_id, recipient_id, title, body, subject_type, subject_id, meta)
+         VALUES (?,?,?,?,?,?,?,?)`,
+        ['post_closed', req.user.id, req._postOwnerId, title, body, 'post', id, meta]
       );
     }
 
