@@ -36,8 +36,8 @@ router.get('/', verifyToken, async (req, res) => {
           n.actor_id,
           n.type,
           n.title,
-          n.body AS message,         -- Android reads "message"
-          n.body,                    -- keep original too
+          n.message AS message,        
+          n.message AS body,                   
           n.subject_type,
           n.subject_id,
           n.indicator,
