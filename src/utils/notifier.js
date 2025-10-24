@@ -30,11 +30,11 @@ async function notify(p) {
 
   const metaJson = meta ? JSON.stringify(meta) : null;
   await pool.query(
-    `INSERT INTO notifications
-      (recipient_id, actor_id, type, title, body, subject_type, subject_id, meta)
-     VALUES (?,?,?,?,?,?,?,?)`,
-    [recipientId, actorId, type, title, body, subjectType, subjectId, metaJson]
-  );
+  `INSERT INTO notifications
+    (recipient_id, actor_id, type, title, message, subject_type, subject_id, meta)
+   VALUES (?,?,?,?,?,?,?,?)`,
+  [recipientId, actorId, type, title, body, subjectType, subjectId, metaJson]
+);
   return { ok: true };
 }
 
