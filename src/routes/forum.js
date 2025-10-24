@@ -388,10 +388,10 @@ router.put('/posts/:id/ban', requireAdmin, async (req, res) => {
     const meta  = JSON.stringify({ postId: id, reason, previousIndicator: rows[0].indicator });
 
     await pool.query(
-      `INSERT INTO notifications (type, actor_id, recipient_id, title, body, subject_type, subject_id, meta)
-       VALUES (?,?,?,?,?,?,?,?)`,
-      ['post_banned', req.user.id, ownerId, title, body, 'post', id, meta]
-    );
+  `INSERT INTO notifications (type, actor_id, recipient_id, title, body, post_id, meta)
+   VALUES (?,?,?,?,?,?,?)`,
+  ['post_banned', req.user.id, ownerId, title, body, id, meta]
+);
 
     res.json({ ok:true });
   } catch (e) {
@@ -442,10 +442,10 @@ router.post('/posts/:id/close', verifyToken, onlyOwnerOrAdmin, async (req, res) 
       const meta  = JSON.stringify({ postId: id, action: 'closed' });
 
       await pool.query(
-        `INSERT INTO notifications (type, actor_id, recipient_id, title, body, subject_type, subject_id, meta)
-         VALUES (?,?,?,?,?,?,?,?)`,
-        ['post_closed', req.user.id, req._postOwnerId, title, body, 'post', id, meta]
-      );
+  `INSERT INTO notifications (type, actor_id, recipient_id, title, body, post_id, meta)
+   VALUES (?,?,?,?,?,?,?)`,
+  ['post_closed', req.user.id, req._postOwnerId, title, body, id, meta]
+);
     }
 
     res.json({ ok:true });
