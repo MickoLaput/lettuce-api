@@ -19,7 +19,7 @@ function verifyToken(req, res, next) {
 
 /**
  * GET /api/notifications?indicator=unread|read&limit=30&offset=0
- * Defaults to unread if not specified.
+ * Defaults to unread.
  */
 router.get('/', verifyToken, async (req, res) => {
   try {
@@ -30,24 +30,29 @@ router.get('/', verifyToken, async (req, res) => {
     const indicator = indQ === 'read' ? 'read' : 'unread';
 
     const [rows] = await pool.query(
-      `SELECT 
+      `SELECT
           n.id,
           n.recipient_id,
           n.actor_id,
           n.type,
           n.title,
-          n.message AS message,        
-          n.message AS body,                   
-          n.subject_type,
-          n.subject_id,
+          n.body           AS message,
+          n.body           AS body,
+          -- synthesize Android fields from our schema:
+          CASE
+            WHEN n.post_id    IS NOT NULL THEN 'post'
+            WHEN n.comment_id IS NOT NULL THEN 'comment'
+            ELSE NULL
+          END               AS subject_type,
+          COALESCE(n.post_id, n.comment_id) AS subject_id,
           n.indicator,
           n.created_at,
           COALESCE(CONCAT(u.firstname,' ',u.lastname), '') AS actor_name
-        FROM notifications n
-        LEFT JOIN users u ON u.id = n.actor_id
-       WHERE n.recipient_id = ? AND n.indicator = ?
-       ORDER BY n.created_at DESC, n.id DESC
-       LIMIT ? OFFSET ?`,
+       FROM notifications n
+       LEFT JOIN users u ON u.id = n.actor_id
+      WHERE n.recipient_id = ? AND n.indicator = ?
+      ORDER BY n.created_at DESC, n.id DESC
+      LIMIT ? OFFSET ?`,
       [uid, indicator, limit, offset]
     );
 
@@ -58,11 +63,7 @@ router.get('/', verifyToken, async (req, res) => {
 
     res.json({ ok:true, items: rows, total: cnt.n });
   } catch (e) {
-    console.error(
-      'notifications.list error:',
-      e.code || '',
-      e.sqlMessage || e.message || e
-    );
+    console.error('notifications.list error:', e.code || '', e.sqlMessage || e.message || e);
     res.status(500).json({ ok:false, error:'server_error' });
   }
 });
@@ -104,7 +105,7 @@ router.put('/read-all', verifyToken, async (req, res) => {
   try {
     const uid = req.user.id;
     const [r] = await pool.query(
-      `UPDATE notifications SET indicator='read' 
+      `UPDATE notifications SET indicator='read'
         WHERE recipient_id=? AND indicator='unread'`,
       [uid]
     );
