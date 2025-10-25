@@ -23,45 +23,55 @@ function verifyToken(req, res, next) {
  */
 router.get('/', verifyToken, async (req, res) => {
   try {
-    const uid       = req.user.id;
-    const limit     = Math.min(parseInt(req.query.limit ?? 30, 10) || 30, 100);
-    const offset    = Math.max(parseInt(req.query.offset ?? 0, 10) || 0, 0);
-    const indQ      = String(req.query.indicator || 'unread').toLowerCase();
-    const indicator = indQ === 'read' ? 'read' : 'unread';
+    const uid    = req.user.id;
+    const limit  = Math.min(parseInt(req.query.limit ?? 30, 10) || 30, 100);
+    const offset = Math.max(parseInt(req.query.offset ?? 0, 10) || 0, 0);
+
+    const indQ = String(req.query.indicator || '').toLowerCase(); // '', 'unread', 'read'
+    const where = ['n.recipient_id = ?'];
+    const args  = [uid];
+
+    // Only apply indicator filter when explicitly asked
+    if (indQ === 'unread' || indQ === 'read') {
+      where.push('n.indicator = ?');
+      args.push(indQ);
+    }
+
+    const whereSql = `WHERE ${where.join(' AND ')}`;
 
     const [rows] = await pool.query(
       `SELECT
-          n.id,
-          n.recipient_id,
-          n.actor_id,
-          n.type,
-          n.title,
-          n.body           AS message,
-          n.body           AS body,
-          -- synthesize Android fields from our schema:
-          CASE
-            WHEN n.post_id    IS NOT NULL THEN 'post'
-            WHEN n.comment_id IS NOT NULL THEN 'comment'
-            ELSE NULL
-          END               AS subject_type,
-          COALESCE(n.post_id, n.comment_id) AS subject_id,
-          n.indicator,
-          n.created_at,
-          COALESCE(CONCAT(u.firstname,' ',u.lastname), '') AS actor_name
+         n.id,
+         n.recipient_id,
+         n.actor_id,
+         n.type,
+         n.title,
+         n.body AS message,
+         n.body AS body,
+         CASE
+           WHEN n.post_id    IS NOT NULL THEN 'post'
+           WHEN n.comment_id IS NOT NULL THEN 'comment'
+           ELSE NULL
+         END AS subject_type,
+         COALESCE(n.post_id, n.comment_id) AS subject_id,
+         n.indicator,
+         n.created_at,
+         COALESCE(CONCAT(u.firstname,' ',u.lastname), '') AS actor_name
        FROM notifications n
        LEFT JOIN users u ON u.id = n.actor_id
-      WHERE n.recipient_id = ? AND n.indicator = ?
-      ORDER BY n.created_at DESC, n.id DESC
-      LIMIT ? OFFSET ?`,
-      [uid, indicator, limit, offset]
+       ${whereSql}
+       -- unread first, then newest
+       ORDER BY (n.indicator = 'unread') DESC, n.created_at DESC, n.id DESC
+       LIMIT ? OFFSET ?`,
+      [...args, limit, offset]
     );
 
     const [[cnt]] = await pool.query(
-      `SELECT COUNT(*) AS n FROM notifications WHERE recipient_id=? AND indicator=?`,
-      [uid, indicator]
+      `SELECT COUNT(*) AS n FROM notifications n ${whereSql}`,
+      args
     );
 
-    res.json({ ok:true, items: rows, total: cnt.n });
+    res.json({ ok: true, items: rows, total: cnt.n });
   } catch (e) {
     console.error('notifications.list error:', e.code || '', e.sqlMessage || e.message || e);
     res.status(500).json({ ok:false, error:'server_error' });
