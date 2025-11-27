@@ -36,29 +36,42 @@ const upload = multer({ storage });
 router.post('/diagnoses', verifyToken, upload.single('image'), async (req, res) => {
   try {
     const { label, confidence } = req.body || {};
-    if (!label || confidence === undefined || !req.file) {
-      return res.status(400).json({ error: 'missing_fields' });
+
+    // basic validation
+    if (!label || typeof confidence === 'undefined' || !req.file) {
+      return res.status(400).json({ ok: false, error: 'missing_fields' });
     }
 
-    let treatment = req.body.treatment || '';
-    if (!treatment) {
-      const [rows] = await pool.query('SELECT protocol FROM treatments WHERE disease=? LIMIT 1', [label]);
-      if (rows.length) treatment = rows[0].protocol;
+    // ALWAYS get the latest protocol from `treatments`
+    let treatment = '';
+    const [rows] = await pool.query(
+      'SELECT protocol FROM treatments WHERE disease = ? LIMIT 1',
+      [label]
+    );
+    if (rows.length) {
+      treatment = rows[0].protocol || '';
     }
 
     const rel = `/uploads/${req.file.filename}`;
     const [r] = await pool.query(
       `INSERT INTO diagnoses (user_id, image_path, label, confidence, treatment)
        VALUES (?,?,?,?,?)`,
-      [req.user.id, rel, label, Number(confidence), treatment || '']
+      [req.user.id, rel, label, Number(confidence), treatment]
     );
 
-    res.json({ ok: true, id: r.insertId, image_path: rel });
+    // include treatment in response just in case the app wants it
+    res.json({
+      ok: true,
+      id: r.insertId,
+      image_path: rel,
+      treatment
+    });
   } catch (e) {
     console.error('POST /api/diagnoses', e);
-    res.status(500).json({ error: 'server_error' });
+    res.status(500).json({ ok: false, error: 'server_error' });
   }
 });
+
 
 router.get('/diagnoses', verifyToken, async (req, res) => {
   const [rows] = await pool.query(
