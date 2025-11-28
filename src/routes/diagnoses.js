@@ -6,6 +6,13 @@ const multer = require('multer');
 const jwt = require('jsonwebtoken');
 const pool = require('../db');
 
+function keyify(s) {
+  return String(s || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_');   // "Downy mildew" -> "downy_mildew"
+}
+
 function verifyToken(req, res, next) {
   const h = req.headers.authorization || '';
   const token = h.startsWith('Bearer ') ? h.slice(7) : null;
@@ -42,11 +49,13 @@ router.post('/diagnoses', verifyToken, upload.single('image'), async (req, res) 
       return res.status(400).json({ ok: false, error: 'missing_fields' });
     }
 
+    const diseaseKey = keyify(label);   // <= normalize before query
+
     // ALWAYS get the latest protocol from `treatments`
     let treatment = '';
     const [rows] = await pool.query(
       'SELECT protocol FROM treatments WHERE disease = ? LIMIT 1',
-      [label]
+      [diseaseKey]
     );
     if (rows.length) {
       treatment = rows[0].protocol || '';
@@ -56,10 +65,10 @@ router.post('/diagnoses', verifyToken, upload.single('image'), async (req, res) 
     const [r] = await pool.query(
       `INSERT INTO diagnoses (user_id, image_path, label, confidence, treatment)
        VALUES (?,?,?,?,?)`,
-      [req.user.id, rel, label, Number(confidence), treatment]
+      [req.user.id, rel, diseaseKey, Number(confidence), treatment]
     );
 
-    // include treatment in response just in case the app wants it
+    // include treatment in response so the app can show it right away
     res.json({
       ok: true,
       id: r.insertId,
@@ -71,6 +80,7 @@ router.post('/diagnoses', verifyToken, upload.single('image'), async (req, res) 
     res.status(500).json({ ok: false, error: 'server_error' });
   }
 });
+
 
 
 router.get('/diagnoses', verifyToken, async (req, res) => {
